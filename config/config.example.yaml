@@ -1,0 +1,159 @@
+# Hub API Gateway Configuration
+
+server:
+  # HTTP server port
+  port: 8080
+  
+  # Request timeout
+  timeout: 30s
+  
+  # Graceful shutdown timeout
+  shutdown_timeout: 30s
+  
+  # Max request body size (in bytes)
+  max_body_size: 10485760  # 10MB
+
+# Redis configuration for caching
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+  
+  # Connection pool settings
+  pool_size: 10
+  max_retries: 3
+  
+  # Token validation cache TTL (in seconds)
+  token_cache_ttl: 300  # 5 minutes
+
+# Microservice addresses
+services:
+  user-service:
+    address: localhost:50051
+    timeout: 5s
+    max_retries: 3
+  
+  order-service:
+    address: localhost:50052
+    timeout: 10s
+    max_retries: 3
+  
+  position-service:
+    address: localhost:50053
+    timeout: 5s
+    max_retries: 3
+  
+  market-data-service:
+    address: localhost:50054
+    timeout: 3s
+    max_retries: 3
+  
+  watchlist-service:
+    address: localhost:50055
+    timeout: 3s
+    max_retries: 3
+  
+  balance-service:
+    address: localhost:50056
+    timeout: 3s
+    max_retries: 3
+
+# Authentication configuration
+auth:
+  # JWT secret (MUST match user service)
+  jwt_secret: ${JWT_SECRET}
+  
+  # Enable token caching
+  cache_enabled: true
+  
+  # Cache TTL (should be shorter than token expiration)
+  cache_ttl: 300  # 5 minutes (token expires in 10 minutes)
+
+# CORS configuration
+cors:
+  enabled: true
+  allowed_origins:
+    - http://localhost:3000
+    - http://localhost:4200
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - OPTIONS
+  allowed_headers:
+    - Authorization
+    - Content-Type
+    - X-Request-ID
+  expose_headers:
+    - X-Request-ID
+  allow_credentials: true
+  max_age: 3600  # 1 hour
+
+# Rate limiting configuration
+rate_limit:
+  enabled: true
+  
+  # Authenticated user limits (per minute)
+  per_user:
+    requests: 100
+    burst: 10
+  
+  # IP-based limits (per minute)
+  per_ip:
+    requests: 20
+    burst: 5
+  
+  # Storage backend
+  storage: redis
+
+# Logging configuration
+logging:
+  level: info  # debug, info, warn, error
+  format: json  # json or text
+  output: stdout
+  
+  # Log request/response details
+  log_requests: true
+  log_responses: false
+  
+  # Mask sensitive data in logs
+  mask_tokens: true
+
+# Metrics configuration
+metrics:
+  enabled: true
+  path: /metrics
+  
+  # Prometheus metrics
+  namespace: hub_gateway
+  subsystem: api
+
+# Health check configuration
+health:
+  enabled: true
+  path: /health
+  
+  # Check service health
+  check_services: true
+  
+  # Health check interval
+  interval: 30s
+
+# Circuit breaker configuration
+circuit_breaker:
+  enabled: true
+  
+  # Failure threshold (consecutive failures before opening circuit)
+  failure_threshold: 5
+  
+  # Success threshold (consecutive successes before closing circuit)
+  success_threshold: 2
+  
+  # Timeout (how long circuit stays open)
+  timeout: 30s
+
+# Environment
+environment: development  # development, staging, production
+

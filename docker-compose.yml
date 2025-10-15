@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # API Gateway
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hub-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      # Server
+      HTTP_PORT: 8080
+      ENVIRONMENT: development
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # Services
+      USER_SERVICE_ADDRESS: user-service:50051
+      ORDER_SERVICE_ADDRESS: order-service:50052
+      POSITION_SERVICE_ADDRESS: position-service:50053
+      MARKET_DATA_SERVICE_ADDRESS: market-data-service:50054
+      
+      # Auth (replace with your JWT secret)
+      JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-here}
+      
+      # Logging
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      
+      # Rate Limiting
+      RATE_LIMIT_ENABLED: "true"
+    depends_on:
+      - redis
+    networks:
+      - hub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: hub-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - hub-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  hub-network:
+    driver: bridge
+
