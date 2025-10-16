@@ -9,21 +9,25 @@ import (
 	"net/http"
 	"time"
 
+	"hub-api-gateway/internal/metrics"
 	"hub-api-gateway/internal/middleware"
 	"hub-api-gateway/internal/router"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
 // ProxyHandler handles HTTP requests and proxies them to gRPC services
 type ProxyHandler struct {
 	registry *ServiceRegistry
+	metrics  *metrics.Metrics
 }
 
 // NewProxyHandler creates a new proxy handler
-func NewProxyHandler(registry *ServiceRegistry) *ProxyHandler {
+func NewProxyHandler(registry *ServiceRegistry, m *metrics.Metrics) *ProxyHandler {
 	return &ProxyHandler{
 		registry: registry,
+		metrics:  m,
 	}
 }
 
@@ -40,12 +44,32 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request, rou
 	// Get user context from middleware (if authenticated)
 	userContext, _ := middleware.GetUserContext(r.Context())
 
-	// Get gRPC connection
-	conn, err := h.registry.GetConnection(route.GetTargetService())
-	if err != nil {
-		log.Printf("❌ Failed to get connection to %s: %v", route.GetTargetService(), err)
+	// Get circuit breaker for the service
+	serviceName := route.GetTargetService()
+	circuitBreaker := h.registry.GetCircuitBreaker(serviceName)
+
+	// Get gRPC connection with circuit breaker protection
+	var conn *grpc.ClientConn
+	if err := circuitBreaker.Call(func() error {
+		var err error
+		conn, err = h.registry.GetConnection(serviceName)
+		if err != nil {
+			log.Printf("❌ Failed to get connection to %s: %v", serviceName, err)
+			return err
+		}
+		return nil
+	}); err != nil {
+		if err == ErrCircuitOpen {
+			log.Printf("⚠️  Circuit breaker OPEN for %s", serviceName)
+			h.metrics.RecordCircuitBreakerTrip()
+			h.metrics.RecordRequest(route.Name, serviceName, time.Since(startTime), false)
+			h.sendError(w, http.StatusServiceUnavailable, "CIRCUIT_BREAKER_OPEN",
+				fmt.Sprintf("Service %s is temporarily unavailable (circuit breaker open)", serviceName))
+			return
+		}
+		h.metrics.RecordRequest(route.Name, serviceName, time.Since(startTime), false)
 		h.sendError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE",
-			fmt.Sprintf("Service %s is unavailable", route.GetTargetService()))
+			fmt.Sprintf("Service %s is unavailable", serviceName))
 		return
 	}
 
@@ -98,6 +122,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request, rou
 	// Send success response
 	elapsed := time.Since(startTime)
 	log.Printf("✅ Request completed in %v: %s %s", elapsed, r.Method, r.URL.Path)
+
+	// Record successful request metrics
+	h.metrics.RecordRequest(route.Name, serviceName, elapsed, true)
 
 	h.sendJSON(w, http.StatusOK, response)
 }

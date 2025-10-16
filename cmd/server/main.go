@@ -12,6 +12,7 @@ import (
 
 	"hub-api-gateway/internal/auth"
 	"hub-api-gateway/internal/config"
+	"hub-api-gateway/internal/metrics"
 	"hub-api-gateway/internal/middleware"
 	"hub-api-gateway/internal/proxy"
 	"hub-api-gateway/internal/router"
@@ -70,8 +71,12 @@ func main() {
 		log.Printf("⚠️  Warning: User Service connectivity check failed: %v", err)
 	}
 
+	// Initialize metrics collector
+	metricsCollector := metrics.NewMetrics()
+	log.Println("✅ Metrics collector initialized")
+
 	// Initialize authentication middleware
-	authMiddleware := middleware.NewAuthMiddleware(userClient, redisClient, cfg)
+	authMiddleware := middleware.NewAuthMiddleware(userClient, redisClient, cfg, metricsCollector)
 
 	// Load route configuration
 	serviceRouter, err := router.NewServiceRouter("config/routes.yaml")
@@ -87,7 +92,7 @@ func main() {
 	defer serviceRegistry.Close()
 
 	// Initialize proxy handler
-	proxyHandler := proxy.NewProxyHandler(serviceRegistry)
+	proxyHandler := proxy.NewProxyHandler(serviceRegistry, metricsCollector)
 
 	// Create HTTP router
 	muxRouter := mux.NewRouter()
@@ -95,8 +100,11 @@ func main() {
 	// Health check endpoint
 	muxRouter.HandleFunc("/health", healthCheckHandler).Methods("GET")
 
-	// Metrics endpoint (placeholder)
-	muxRouter.HandleFunc("/metrics", metricsHandler).Methods("GET")
+	// Metrics endpoints
+	metricsHandler := metrics.NewHandler(metricsCollector)
+	muxRouter.HandleFunc("/metrics", metricsHandler.HandlePrometheus).Methods("GET")
+	muxRouter.HandleFunc("/metrics/json", metricsHandler.HandleJSON).Methods("GET")
+	muxRouter.HandleFunc("/metrics/summary", metricsHandler.HandleSummary).Methods("GET")
 
 	// Login endpoint (special case - handled directly)
 	loginHandler := auth.NewLoginHandler(userClient)
@@ -180,68 +188,6 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 		"version": "` + version + `",
 		"timestamp": "` + time.Now().Format(time.RFC3339) + `"
 	}`
-
-	w.Write([]byte(response))
-}
-
-// metricsHandler handles metrics requests (placeholder)
-func metricsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusOK)
-
-	// Placeholder metrics
-	metrics := `# HELP gateway_info Gateway information
-# TYPE gateway_info gauge
-gateway_info{version="` + version + `"} 1
-
-# HELP gateway_requests_total Total number of requests
-# TYPE gateway_requests_total counter
-gateway_requests_total 0
-`
-
-	w.Write([]byte(metrics))
-}
-
-// profileHandler handles profile requests (protected endpoint example)
-func profileHandler(w http.ResponseWriter, r *http.Request) {
-	userContext, ok := middleware.GetUserContext(r.Context())
-	if !ok {
-		http.Error(w, "User context not found", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := fmt.Sprintf(`{
-		"userId": "%s",
-		"email": "%s",
-		"message": "This is a protected endpoint"
-	}`, userContext.UserID, userContext.Email)
-
-	w.Write([]byte(response))
-}
-
-// testProtectedHandler is a simple test endpoint that requires authentication
-func testProtectedHandler(w http.ResponseWriter, r *http.Request) {
-	userContext, ok := middleware.GetUserContext(r.Context())
-	if !ok {
-		http.Error(w, "User context not found", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := fmt.Sprintf(`{
-		"status": "success",
-		"message": "You are authenticated!",
-		"user": {
-			"userId": "%s",
-			"email": "%s"
-		},
-		"timestamp": "%s"
-	}`, userContext.UserID, userContext.Email, time.Now().Format(time.RFC3339))
 
 	w.Write([]byte(response))
 }

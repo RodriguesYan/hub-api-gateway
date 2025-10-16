@@ -13,6 +13,7 @@ import (
 
 	"hub-api-gateway/internal/auth"
 	"hub-api-gateway/internal/config"
+	"hub-api-gateway/internal/metrics"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -28,14 +29,16 @@ type AuthMiddleware struct {
 	userClient  *auth.UserServiceClient
 	redisClient *redis.Client
 	config      *config.Config
+	metrics     *metrics.Metrics
 }
 
 // NewAuthMiddleware creates a new authentication middleware
-func NewAuthMiddleware(userClient *auth.UserServiceClient, redisClient *redis.Client, cfg *config.Config) *AuthMiddleware {
+func NewAuthMiddleware(userClient *auth.UserServiceClient, redisClient *redis.Client, cfg *config.Config, m *metrics.Metrics) *AuthMiddleware {
 	return &AuthMiddleware{
 		userClient:  userClient,
 		redisClient: redisClient,
 		config:      cfg,
+		metrics:     m,
 	}
 }
 
@@ -102,6 +105,9 @@ func (m *AuthMiddleware) ValidateToken(ctx context.Context, token string) (*User
 		cachedUser, err := m.getFromCache(ctx, cacheKey)
 		if err == nil && cachedUser != nil {
 			log.Printf("🚀 Token validation cache HIT for user: %s", cachedUser.Email)
+			if m.metrics != nil {
+				m.metrics.RecordCacheHit()
+			}
 			return cachedUser, nil
 		}
 		if err != nil && err != redis.Nil {
@@ -110,6 +116,9 @@ func (m *AuthMiddleware) ValidateToken(ctx context.Context, token string) (*User
 	}
 
 	log.Printf("📞 Token validation cache MISS, calling User Service...")
+	if m.metrics != nil {
+		m.metrics.RecordCacheMiss()
+	}
 
 	userContext, err := m.validateTokenWithUserService(ctx, token)
 	if err != nil {

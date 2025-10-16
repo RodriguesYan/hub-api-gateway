@@ -16,16 +16,18 @@ import (
 
 // ServiceRegistry manages gRPC connections to microservices
 type ServiceRegistry struct {
-	connections map[string]*grpc.ClientConn
-	config      *config.Config
-	mu          sync.RWMutex
+	connections     map[string]*grpc.ClientConn
+	circuitBreakers map[string]*CircuitBreaker
+	config          *config.Config
+	mu              sync.RWMutex
 }
 
 // NewServiceRegistry creates a new service registry
 func NewServiceRegistry(cfg *config.Config) *ServiceRegistry {
 	return &ServiceRegistry{
-		connections: make(map[string]*grpc.ClientConn),
-		config:      cfg,
+		connections:     make(map[string]*grpc.ClientConn),
+		circuitBreakers: make(map[string]*CircuitBreaker),
+		config:          cfg,
 	}
 }
 
@@ -158,4 +160,37 @@ func (r *ServiceRegistry) GetConnectionState(serviceName string) (string, error)
 	}
 
 	return conn.GetState().String(), nil
+}
+
+// GetCircuitBreaker returns the circuit breaker for a service
+func (r *ServiceRegistry) GetCircuitBreaker(serviceName string) *CircuitBreaker {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if cb, exists := r.circuitBreakers[serviceName]; exists {
+		return cb
+	}
+
+	// Create new circuit breaker with default config
+	cb := NewCircuitBreaker(serviceName, CircuitBreakerConfig{
+		MaxFailures:      5,
+		ResetTimeout:     30 * time.Second,
+		HalfOpenRequests: 3,
+	})
+	r.circuitBreakers[serviceName] = cb
+	log.Printf("🔌 Created circuit breaker for %s", serviceName)
+
+	return cb
+}
+
+// GetAllCircuitBreakers returns all circuit breakers
+func (r *ServiceRegistry) GetAllCircuitBreakers() map[string]*CircuitBreaker {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	breakers := make(map[string]*CircuitBreaker, len(r.circuitBreakers))
+	for name, cb := range r.circuitBreakers {
+		breakers[name] = cb
+	}
+	return breakers
 }
