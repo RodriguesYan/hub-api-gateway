@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package hub_investments;
+
+option go_package = "./proto";
+
+// ====================================
+// COMMON MESSAGE TYPES
+// ====================================
+
+// APIResponse is a common response type for all services
+message APIResponse {
+  bool success = 1;
+  string message = 2;
+  int32 code = 3;
+  int64 timestamp = 4;
+}
+
+// UserInfo contains basic user information
+message UserInfo {
+  string user_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+}
+
+// ErrorDetails provides detailed error information
+message ErrorDetails {
+  string error = 1;
+  string message = 2;
+  int32 code = 3;
+  repeated string details = 4;
+}
