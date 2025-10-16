@@ -13,6 +13,7 @@ import (
 	"hub-api-gateway/internal/auth"
 	"hub-api-gateway/internal/config"
 	"hub-api-gateway/internal/middleware"
+	"hub-api-gateway/internal/proxy"
 	"hub-api-gateway/internal/router"
 
 	"github.com/gorilla/mux"
@@ -81,6 +82,13 @@ func main() {
 	// List all configured routes
 	serviceRouter.ListRoutes()
 
+	// Initialize service registry for gRPC connections
+	serviceRegistry := proxy.NewServiceRegistry(cfg)
+	defer serviceRegistry.Close()
+
+	// Initialize proxy handler
+	proxyHandler := proxy.NewProxyHandler(serviceRegistry)
+
 	// Create HTTP router
 	muxRouter := mux.NewRouter()
 
@@ -90,17 +98,32 @@ func main() {
 	// Metrics endpoint (placeholder)
 	muxRouter.HandleFunc("/metrics", metricsHandler).Methods("GET")
 
-	// Authentication endpoints (public)
+	// Login endpoint (special case - handled directly)
 	loginHandler := auth.NewLoginHandler(userClient)
 	muxRouter.HandleFunc("/api/v1/auth/login", loginHandler.Handle).Methods("POST", "OPTIONS")
 
-	// Protected routes (require authentication)
-	protectedRouter := muxRouter.PathPrefix("/api/v1").Subrouter()
-	protectedRouter.Use(authMiddleware.Middleware)
+	// Dynamic route handler for all other routes
+	muxRouter.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Find matching route
+		route, err := serviceRouter.FindRoute(r.URL.Path, r.Method)
+		if err != nil {
+			log.Printf("⚠️  No route found for %s %s", r.Method, r.URL.Path)
+			http.Error(w, `{"error": "Route not found", "code": "ROUTE_NOT_FOUND"}`, http.StatusNotFound)
+			return
+		}
 
-	// Example protected endpoint
-	protectedRouter.HandleFunc("/profile", profileHandler).Methods("GET")
-	protectedRouter.HandleFunc("/test", testProtectedHandler).Methods("GET")
+		// Check authentication requirement
+		if route.RequiresAuth() {
+			// Apply auth middleware
+			authMiddleware.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Forward to proxy handler
+				proxyHandler.HandleRequest(w, r, route)
+			})).ServeHTTP(w, r)
+		} else {
+			// Public route - forward directly
+			proxyHandler.HandleRequest(w, r, route)
+		}
+	})
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
