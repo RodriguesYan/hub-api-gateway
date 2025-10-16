@@ -13,6 +13,7 @@ import (
 	"hub-api-gateway/internal/auth"
 	"hub-api-gateway/internal/config"
 	"hub-api-gateway/internal/middleware"
+	"hub-api-gateway/internal/router"
 
 	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
@@ -71,21 +72,30 @@ func main() {
 	// Initialize authentication middleware
 	authMiddleware := middleware.NewAuthMiddleware(userClient, redisClient, cfg)
 
-	// Create router
-	router := mux.NewRouter()
+	// Load route configuration
+	serviceRouter, err := router.NewServiceRouter("config/routes.yaml")
+	if err != nil {
+		log.Fatalf("❌ Failed to load routes: %v", err)
+	}
+
+	// List all configured routes
+	serviceRouter.ListRoutes()
+
+	// Create HTTP router
+	muxRouter := mux.NewRouter()
 
 	// Health check endpoint
-	router.HandleFunc("/health", healthCheckHandler).Methods("GET")
+	muxRouter.HandleFunc("/health", healthCheckHandler).Methods("GET")
 
 	// Metrics endpoint (placeholder)
-	router.HandleFunc("/metrics", metricsHandler).Methods("GET")
+	muxRouter.HandleFunc("/metrics", metricsHandler).Methods("GET")
 
 	// Authentication endpoints (public)
 	loginHandler := auth.NewLoginHandler(userClient)
-	router.HandleFunc("/api/v1/auth/login", loginHandler.Handle).Methods("POST", "OPTIONS")
+	muxRouter.HandleFunc("/api/v1/auth/login", loginHandler.Handle).Methods("POST", "OPTIONS")
 
 	// Protected routes (require authentication)
-	protectedRouter := router.PathPrefix("/api/v1").Subrouter()
+	protectedRouter := muxRouter.PathPrefix("/api/v1").Subrouter()
 	protectedRouter.Use(authMiddleware.Middleware)
 
 	// Example protected endpoint
@@ -96,7 +106,7 @@ func main() {
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	server := &http.Server{
 		Addr:           addr,
-		Handler:        router,
+		Handler:        muxRouter,
 		ReadTimeout:    cfg.Server.Timeout,
 		WriteTimeout:   cfg.Server.Timeout,
 		IdleTimeout:    120 * time.Second,
