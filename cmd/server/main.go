@@ -12,8 +12,10 @@ import (
 
 	"hub-api-gateway/internal/auth"
 	"hub-api-gateway/internal/config"
+	"hub-api-gateway/internal/middleware"
 
 	"github.com/gorilla/mux"
+	"github.com/redis/go-redis/v9"
 )
 
 const version = "1.0.0"
@@ -25,6 +27,33 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("❌ Failed to load configuration: %v", err)
+	}
+
+	// Initialize Redis client (optional, for caching)
+	var redisClient *redis.Client
+	if cfg.Auth.CacheEnabled {
+		redisClient = redis.NewClient(&redis.Options{
+			Addr:     fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+
+		// Test Redis connectivity
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			log.Printf("⚠️  Warning: Redis connection failed (continuing without cache): %v", err)
+			redisClient = nil
+		} else {
+			log.Println("✅ Connected to Redis for token caching")
+		}
+	} else {
+		log.Println("ℹ️  Redis caching disabled")
+	}
+
+	if redisClient != nil {
+		defer redisClient.Close()
 	}
 
 	// Initialize User Service gRPC client
@@ -39,6 +68,9 @@ func main() {
 		log.Printf("⚠️  Warning: User Service connectivity check failed: %v", err)
 	}
 
+	// Initialize authentication middleware
+	authMiddleware := middleware.NewAuthMiddleware(userClient, redisClient, cfg)
+
 	// Create router
 	router := mux.NewRouter()
 
@@ -48,9 +80,17 @@ func main() {
 	// Metrics endpoint (placeholder)
 	router.HandleFunc("/metrics", metricsHandler).Methods("GET")
 
-	// Authentication endpoints
+	// Authentication endpoints (public)
 	loginHandler := auth.NewLoginHandler(userClient)
 	router.HandleFunc("/api/v1/auth/login", loginHandler.Handle).Methods("POST", "OPTIONS")
+
+	// Protected routes (require authentication)
+	protectedRouter := router.PathPrefix("/api/v1").Subrouter()
+	protectedRouter.Use(authMiddleware.Middleware)
+
+	// Example protected endpoint
+	protectedRouter.HandleFunc("/profile", profileHandler).Methods("GET")
+	protectedRouter.HandleFunc("/test", testProtectedHandler).Methods("GET")
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
@@ -127,4 +167,48 @@ gateway_requests_total 0
 `
 
 	w.Write([]byte(metrics))
+}
+
+// profileHandler handles profile requests (protected endpoint example)
+func profileHandler(w http.ResponseWriter, r *http.Request) {
+	userContext, ok := middleware.GetUserContext(r.Context())
+	if !ok {
+		http.Error(w, "User context not found", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	response := fmt.Sprintf(`{
+		"userId": "%s",
+		"email": "%s",
+		"message": "This is a protected endpoint"
+	}`, userContext.UserID, userContext.Email)
+
+	w.Write([]byte(response))
+}
+
+// testProtectedHandler is a simple test endpoint that requires authentication
+func testProtectedHandler(w http.ResponseWriter, r *http.Request) {
+	userContext, ok := middleware.GetUserContext(r.Context())
+	if !ok {
+		http.Error(w, "User context not found", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	response := fmt.Sprintf(`{
+		"status": "success",
+		"message": "You are authenticated!",
+		"user": {
+			"userId": "%s",
+			"email": "%s"
+		},
+		"timestamp": "%s"
+	}`, userContext.UserID, userContext.Email, time.Now().Format(time.RFC3339))
+
+	w.Write([]byte(response))
 }
