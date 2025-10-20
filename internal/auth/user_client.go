@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 
-	"hub-api-gateway/internal/auth/proto"
 	"hub-api-gateway/internal/config"
 
+	authpb "github.com/RodriguesYan/hub-proto-contracts/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -15,7 +15,7 @@ import (
 // UserServiceClient wraps the gRPC client for User Service
 type UserServiceClient struct {
 	conn   *grpc.ClientConn
-	client proto.AuthServiceClient
+	client authpb.AuthServiceClient
 	config config.ServiceConfig
 }
 
@@ -37,7 +37,7 @@ func NewUserServiceClient(cfg *config.Config) (*UserServiceClient, error) {
 	// Initiate connection (non-blocking)
 	conn.Connect()
 
-	client := proto.NewAuthServiceClient(conn)
+	client := authpb.NewAuthServiceClient(conn)
 
 	log.Printf("✅ Connected to User Service at %s", serviceConfig.Address)
 
@@ -49,12 +49,12 @@ func NewUserServiceClient(cfg *config.Config) (*UserServiceClient, error) {
 }
 
 // Login calls the Login RPC method on User Service
-func (c *UserServiceClient) Login(ctx context.Context, email, password string) (*proto.LoginResponse, error) {
+func (c *UserServiceClient) Login(ctx context.Context, email, password string) (*authpb.LoginResponse, error) {
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, c.config.Timeout)
 	defer cancel()
 
-	req := &proto.LoginRequest{
+	req := &authpb.LoginRequest{
 		Email:    email,
 		Password: password,
 	}
@@ -77,12 +77,12 @@ func (c *UserServiceClient) Login(ctx context.Context, email, password string) (
 }
 
 // ValidateToken calls the ValidateToken RPC method on User Service
-func (c *UserServiceClient) ValidateToken(ctx context.Context, token string) (*proto.ValidateTokenResponse, error) {
+func (c *UserServiceClient) ValidateToken(ctx context.Context, token string) (*authpb.ValidateTokenResponse, error) {
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, c.config.Timeout)
 	defer cancel()
 
-	req := &proto.ValidateTokenRequest{
+	req := &authpb.ValidateTokenRequest{
 		Token: token,
 	}
 

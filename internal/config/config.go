@@ -101,6 +101,12 @@ func Load() (*Config, error) {
 				Timeout:    getDurationEnv("USER_SERVICE_TIMEOUT", 5*time.Second),
 				MaxRetries: getIntEnv("USER_SERVICE_MAX_RETRIES", 3),
 			},
+			// HubInvestments Monolith (Step 4.6.6)
+			"hub-monolith": {
+				Address:    getEnv("HUB_MONOLITH_ADDRESS", "localhost:50060"),
+				Timeout:    getDurationEnv("HUB_MONOLITH_TIMEOUT", 10*time.Second),
+				MaxRetries: getIntEnv("HUB_MONOLITH_MAX_RETRIES", 3),
+			},
 			"order-service": {
 				Address:    getEnv("ORDER_SERVICE_ADDRESS", "localhost:50052"),
 				Timeout:    getDurationEnv("ORDER_SERVICE_TIMEOUT", 10*time.Second),
