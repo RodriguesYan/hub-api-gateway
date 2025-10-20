@@ -26,7 +26,18 @@ test-coverage: ## Run tests with coverage report
 
 run: ## Run the gateway locally
 	@echo "Starting gateway..."
-	@go run cmd/server/main.go
+	@if [ -z "$$JWT_SECRET" ]; then \
+		echo "⚠️  JWT_SECRET not set. Loading from .env if available..."; \
+		if [ -f .env ]; then \
+			export $$(cat .env | grep -v '^#' | xargs) && go run cmd/server/main.go; \
+		else \
+			echo "❌ JWT_SECRET environment variable is required"; \
+			echo "Run: export JWT_SECRET=\"HubInv3stm3nts_S3cur3_JWT_K3y_2024_!@#$%^\""; \
+			exit 1; \
+		fi \
+	else \
+		go run cmd/server/main.go; \
+	fi
 
 dev: ## Run with hot reload (requires air: go install github.com/cosmtrek/air@latest)
 	@echo "Starting gateway with hot reload..."

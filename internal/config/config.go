@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // Config holds all gateway configuration
@@ -79,6 +81,15 @@ var globalConfig *Config
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
+	// Try to load from .env file (like HubInvestmentsServer does)
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Printf("⚠️  Could not load .env file: %v", err)
+		log.Println("Using environment variables or default values...")
+	} else {
+		log.Println("✅ Loaded configuration from .env file")
+	}
+
 	log.Println("Loading configuration from environment variables...")
 
 	cfg := &Config{
