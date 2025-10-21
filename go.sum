@@ -1,5 +1,5 @@
-github.com/RodriguesYan/hub-proto-contracts v1.0.0 h1:CjY/6PtB54nkg5+z/jtctDYKgeXUFn/rym8PiCYhwFE=
-github.com/RodriguesYan/hub-proto-contracts v1.0.0/go.mod h1:V779U3hJXgWLo1nbmmMJ0C3HnkcRjYChFFzrka1p70o=
+github.com/RodriguesYan/hub-proto-contracts v1.0.4 h1:Zr7ELdmlkCXYCLgLtUmsUMjOmZu0D7oTgP5DkOTdghc=
+github.com/RodriguesYan/hub-proto-contracts v1.0.4/go.mod h1:V779U3hJXgWLo1nbmmMJ0C3HnkcRjYChFFzrka1p70o=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=

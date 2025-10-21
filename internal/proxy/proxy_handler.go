@@ -13,8 +13,11 @@ import (
 	"hub-api-gateway/internal/middleware"
 	"hub-api-gateway/internal/router"
 
+	monolithpb "github.com/RodriguesYan/hub-proto-contracts/monolith"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // ProxyHandler handles HTTP requests and proxies them to gRPC services
@@ -106,12 +109,20 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request, rou
 
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
-	// Invoke gRPC method
+	// Invoke gRPC method with proper protobuf messages
 	grpcService, grpcMethod := route.GetGRPCTarget()
-	fullMethod := fmt.Sprintf("/%s/%s", grpcService, grpcMethod)
+	// Use the full proto package name for the service
+	fullMethod := fmt.Sprintf("/hub_investments.%s/%s", grpcService, grpcMethod)
 
-	var response interface{}
-	err = conn.Invoke(ctx, fullMethod, h.buildRequest(body, pathVars), &response)
+	// Create proper protobuf request and response messages
+	request, response, err := h.createProtoMessages(grpcService, grpcMethod, body, pathVars, userContext)
+	if err != nil {
+		log.Printf("❌ Failed to create proto messages: %v", err)
+		h.sendError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	err = conn.Invoke(ctx, fullMethod, request, response)
 
 	if err != nil {
 		log.Printf("❌ gRPC call failed for %s: %v", fullMethod, err)
@@ -126,30 +137,169 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request, rou
 	// Record successful request metrics
 	h.metrics.RecordRequest(route.Name, serviceName, elapsed, true)
 
-	h.sendJSON(w, http.StatusOK, response)
+	// Convert proto response to JSON
+	h.sendProtoJSON(w, http.StatusOK, response)
 }
 
-// buildRequest builds a gRPC request from HTTP body and path variables
-func (h *ProxyHandler) buildRequest(body []byte, pathVars map[string]string) interface{} {
-	// Try to parse as JSON
-	var request map[string]interface{}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &request); err != nil {
-			// If not JSON, treat as raw body
-			request = map[string]interface{}{
-				"body": string(body),
+// createProtoMessages creates the appropriate protobuf request and response messages
+func (h *ProxyHandler) createProtoMessages(service, method string, body []byte, pathVars map[string]string, userContext *middleware.UserContext) (proto.Message, proto.Message, error) {
+	// Map service.method to proto message types
+	switch fmt.Sprintf("%s.%s", service, method) {
+	case "BalanceService.GetBalance":
+		req := &monolithpb.GetBalanceRequest{}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.GetBalanceResponse{}, nil
+
+	case "PortfolioService.GetPortfolioSummary":
+		req := &monolithpb.GetPortfolioSummaryRequest{}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.GetPortfolioSummaryResponse{}, nil
+
+	case "OrderService.SubmitOrder":
+		req := &monolithpb.SubmitOrderRequest{}
+		if len(body) > 0 {
+			if err := protojson.Unmarshal(body, req); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal SubmitOrder request: %w", err)
 			}
 		}
-	} else {
-		request = make(map[string]interface{})
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.SubmitOrderResponse{}, nil
+
+	case "OrderService.GetOrderDetails":
+		req := &monolithpb.GetOrderDetailsRequest{}
+		if orderId, ok := pathVars["id"]; ok {
+			req.OrderId = orderId
+		}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.GetOrderDetailsResponse{}, nil
+
+	case "OrderService.GetOrderStatus":
+		req := &monolithpb.GetOrderStatusRequest{}
+		if orderId, ok := pathVars["id"]; ok {
+			req.OrderId = orderId
+		}
+		return req, &monolithpb.GetOrderStatusResponse{}, nil
+
+	case "OrderService.CancelOrder":
+		req := &monolithpb.CancelOrderRequest{}
+		if orderId, ok := pathVars["id"]; ok {
+			req.OrderId = orderId
+		}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.CancelOrderResponse{}, nil
+
+	case "PositionService.GetPositions":
+		req := &monolithpb.GetPositionsRequest{}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.GetPositionsResponse{}, nil
+
+	case "PositionService.GetPositionAggregation":
+		req := &monolithpb.GetPositionAggregationRequest{}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.GetPositionAggregationResponse{}, nil
+
+	case "MarketDataService.GetMarketData":
+		req := &monolithpb.GetMarketDataRequest{}
+		if symbol, ok := pathVars["symbol"]; ok {
+			req.Symbol = symbol
+		}
+		return req, &monolithpb.GetMarketDataResponse{}, nil
+
+	case "MarketDataService.GetAssetDetails":
+		req := &monolithpb.GetAssetDetailsRequest{}
+		if symbol, ok := pathVars["symbol"]; ok {
+			req.Symbol = symbol
+		}
+		return req, &monolithpb.GetAssetDetailsResponse{}, nil
+
+	case "MarketDataService.GetBatchMarketData":
+		req := &monolithpb.GetBatchMarketDataRequest{}
+		if len(body) > 0 {
+			if err := protojson.Unmarshal(body, req); err != nil {
+				return nil, nil, fmt.Errorf("failed to unmarshal GetBatchMarketData request: %w", err)
+			}
+		}
+		return req, &monolithpb.GetBatchMarketDataResponse{}, nil
+
+	default:
+		return nil, nil, fmt.Errorf("unsupported service method: %s.%s", service, method)
+	}
+}
+
+// sendProtoJSON sends a protobuf message as JSON
+func (h *ProxyHandler) sendProtoJSON(w http.ResponseWriter, statusCode int, msg proto.Message) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	// Convert proto message to JSON
+	marshaler := protojson.MarshalOptions{
+		UseProtoNames:   true,
+		EmitUnpopulated: true,
 	}
 
-	// Add path variables to request
-	for key, value := range pathVars {
-		request[key] = value
+	jsonBytes, err := marshaler.Marshal(msg)
+	if err != nil {
+		log.Printf("❌ Failed to marshal proto to JSON: %v", err)
+		h.sendError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to encode response")
+		return
 	}
 
-	return request
+	// Unwrap api_response wrapper for cleaner API responses
+	unwrappedJSON := h.unwrapAPIResponse(jsonBytes)
+	w.Write(unwrappedJSON)
+}
+
+// unwrapAPIResponse removes the api_response wrapper from the JSON response
+func (h *ProxyHandler) unwrapAPIResponse(jsonBytes []byte) []byte {
+	var response map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &response); err != nil {
+		// If unmarshal fails, return original
+		return jsonBytes
+	}
+
+	// Check if api_response exists and is successful
+	if apiResp, ok := response["api_response"].(map[string]interface{}); ok {
+		// Check if the response was successful
+		if success, ok := apiResp["success"].(bool); ok && !success {
+			// If not successful, keep the api_response for error details
+			return jsonBytes
+		}
+
+		// Remove api_response from the response
+		delete(response, "api_response")
+
+		// If response only has one other field, unwrap it
+		if len(response) == 1 {
+			for _, value := range response {
+				// Return just the inner object
+				if innerBytes, err := json.Marshal(value); err == nil {
+					return innerBytes
+				}
+			}
+		}
+	}
+
+	// Re-marshal without api_response
+	if cleanBytes, err := json.Marshal(response); err == nil {
+		return cleanBytes
+	}
+
+	// If anything fails, return original
+	return jsonBytes
 }
 
 // handleGRPCError converts gRPC errors to HTTP errors
