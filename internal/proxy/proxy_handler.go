@@ -198,6 +198,13 @@ func (h *ProxyHandler) createProtoMessages(service, method string, body []byte, 
 		}
 		return req, &monolithpb.CancelOrderResponse{}, nil
 
+	case "OrderService.GetOrderHistory":
+		req := &monolithpb.GetOrderHistoryRequest{}
+		if userContext != nil {
+			req.UserId = userContext.UserID
+		}
+		return req, &monolithpb.GetOrderHistoryResponse{}, nil
+
 	case "PositionService.GetPositions":
 		req := &monolithpb.GetPositionsRequest{}
 		if userContext != nil {
