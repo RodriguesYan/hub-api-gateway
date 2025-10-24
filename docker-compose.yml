@@ -1,73 +1,197 @@
 version: '3.8'
 
+# Hub API Gateway - Docker Compose Configuration
+# This file defines the gateway service and its dependencies for local development
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose down               # Stop all services
+#   docker-compose logs -f gateway    # View gateway logs
+#   docker-compose ps                 # Check service status
+
 services:
-  # API Gateway
+  # ============================================================================
+  # API Gateway Service
+  # ============================================================================
   gateway:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: hub-api-gateway/Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: hub-api-gateway:${VERSION:-latest}
     container_name: hub-api-gateway
+    
+    # Port mapping
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT:-8080}:8080"
+    
+    # Environment variables
     environment:
-      # Server
+      # Server configuration
       HTTP_PORT: 8080
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SERVER_TIMEOUT: ${SERVER_TIMEOUT:-30s}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-10s}
       
-      # Redis
+      # Redis configuration
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
       
-      # Services
-      USER_SERVICE_ADDRESS: user-service:50051
-      ORDER_SERVICE_ADDRESS: order-service:50052
-      POSITION_SERVICE_ADDRESS: position-service:50053
-      MARKET_DATA_SERVICE_ADDRESS: market-data-service:50054
+      # Service addresses (gRPC)
+      USER_SERVICE_ADDRESS: ${USER_SERVICE_ADDRESS:-user-service:50051}
+      ORDER_SERVICE_ADDRESS: ${ORDER_SERVICE_ADDRESS:-hub-monolith:50060}
+      POSITION_SERVICE_ADDRESS: ${POSITION_SERVICE_ADDRESS:-hub-monolith:50060}
+      MARKET_DATA_SERVICE_ADDRESS: ${MARKET_DATA_SERVICE_ADDRESS:-hub-monolith:50060}
+      MONOLITH_SERVICE_ADDRESS: ${MONOLITH_SERVICE_ADDRESS:-hub-monolith:50060}
       
-      # Auth (replace with your JWT secret)
-      JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-here}
+      # Authentication configuration
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      AUTH_CACHE_ENABLED: ${AUTH_CACHE_ENABLED:-true}
+      AUTH_CACHE_TTL: ${AUTH_CACHE_TTL:-5m}
       
-      # Logging
-      LOG_LEVEL: info
-      LOG_FORMAT: json
+      # Logging configuration
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       
-      # Rate Limiting
-      RATE_LIMIT_ENABLED: "true"
+      # Rate limiting configuration
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      
+      # Circuit breaker configuration
+      CIRCUIT_BREAKER_ENABLED: ${CIRCUIT_BREAKER_ENABLED:-true}
+      CIRCUIT_BREAKER_THRESHOLD: ${CIRCUIT_BREAKER_THRESHOLD:-5}
+      CIRCUIT_BREAKER_TIMEOUT: ${CIRCUIT_BREAKER_TIMEOUT:-30s}
+      
+      # CORS configuration
+      CORS_ENABLED: ${CORS_ENABLED:-true}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+    
+    # Volume mounts (optional - for configuration overrides)
+    volumes:
+      - ./config:/app/config:ro
+      - gateway-logs:/app/logs
+    
+    # Dependencies
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    
+    # Networking
     networks:
       - hub-network
+    
+    # Restart policy
     restart: unless-stopped
+    
+    # Health check
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 10s
+    
+    # Resource limits (optional - uncomment for production)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 256M
+    
+    # Labels for container management
+    labels:
+      com.hubinvestments.service: "api-gateway"
+      com.hubinvestments.version: "${VERSION:-dev}"
+      com.hubinvestments.environment: "${ENVIRONMENT:-development}"
 
-  # Redis for caching
+  # ============================================================================
+  # Redis Service (Token Caching)
+  # ============================================================================
   redis:
     image: redis:7-alpine
     container_name: hub-redis
+    
+    # Port mapping
     ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
+      - "${REDIS_PORT:-6379}:6379"
+    
+    # Redis configuration
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    
+    # Persistent storage
     volumes:
       - redis-data:/data
+    
+    # Networking
     networks:
       - hub-network
+    
+    # Restart policy
     restart: unless-stopped
+    
+    # Health check
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
+      start_period: 5s
+    
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 256M
+    
+    # Labels
+    labels:
+      com.hubinvestments.service: "redis-cache"
+      com.hubinvestments.version: "7-alpine"
 
+# ============================================================================
+# Volumes
+# ============================================================================
 volumes:
+  # Redis persistent data
   redis-data:
     driver: local
+    labels:
+      com.hubinvestments.volume: "redis-data"
+  
+  # Gateway logs (optional)
+  gateway-logs:
+    driver: local
+    labels:
+      com.hubinvestments.volume: "gateway-logs"
 
+# ============================================================================
+# Networks
+# ============================================================================
 networks:
   hub-network:
     driver: bridge
+    labels:
+      com.hubinvestments.network: "hub-network"
+    # Optional: Define subnet for consistent IP addressing
+    # ipam:
+    #   config:
+    #     - subnet: 172.20.0.0/16
 

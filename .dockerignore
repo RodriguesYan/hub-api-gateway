@@ -1,0 +1,80 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+LICENSE
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gateway
+main
+
+# Test artifacts
+*.test
+*.out
+coverage.out
+coverage.html
+test/
+*_test.go
+
+# Environment files
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+
+# Configuration (keep only examples)
+config/*.yaml
+!config/*.example.yaml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+
+# Dependencies (will be downloaded during build)
+vendor/
+
+# Go workspace
+go.work
+go.work.sum
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Makefile and scripts
+Makefile
+*.sh
+
+# Air (hot reload tool)
+.air.toml
+tmp/
+

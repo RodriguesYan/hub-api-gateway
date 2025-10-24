@@ -1,0 +1,360 @@
+version: '3.8'
+
+# Hub API Gateway - Production Docker Compose Configuration
+# This file is optimized for production deployments with:
+# - Resource limits
+# - Health checks
+# - Restart policies
+# - Security hardening
+# - Monitoring integration
+#
+# Usage:
+#   docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  # ============================================================================
+  # API Gateway Service (Production)
+  # ============================================================================
+  gateway:
+    image: hub-api-gateway:${VERSION:-latest}
+    container_name: hub-api-gateway-prod
+    
+    # Port mapping (use reverse proxy in production)
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    
+    # Environment variables (use secrets for sensitive data)
+    environment:
+      # Server configuration
+      HTTP_PORT: 8080
+      ENVIRONMENT: production
+      SERVER_TIMEOUT: 30s
+      SHUTDOWN_TIMEOUT: 10s
+      
+      # Redis configuration
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      
+      # Service addresses (gRPC)
+      USER_SERVICE_ADDRESS: ${USER_SERVICE_ADDRESS:-user-service:50051}
+      MONOLITH_SERVICE_ADDRESS: ${MONOLITH_SERVICE_ADDRESS:-hub-monolith:50060}
+      
+      # Authentication (use Docker secrets in production)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      AUTH_CACHE_ENABLED: "true"
+      AUTH_CACHE_TTL: 5m
+      
+      # Logging configuration
+      LOG_LEVEL: warn
+      LOG_FORMAT: json
+      
+      # Rate limiting (stricter in production)
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_REQUESTS: 100
+      RATE_LIMIT_WINDOW: 1m
+      
+      # Circuit breaker
+      CIRCUIT_BREAKER_ENABLED: "true"
+      CIRCUIT_BREAKER_THRESHOLD: 5
+      CIRCUIT_BREAKER_TIMEOUT: 30s
+      
+      # CORS (restrict in production)
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://app.hubinvestments.com}
+    
+    # Volume mounts (read-only for security)
+    volumes:
+      - ./config:/app/config:ro
+      - gateway-logs:/app/logs
+    
+    # Dependencies
+    depends_on:
+      redis:
+        condition: service_healthy
+    
+    # Networking
+    networks:
+      - hub-network
+    
+    # Restart policy (always restart on failure)
+    restart: always
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    
+    # Resource limits (adjust based on load)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      
+      # Restart policy for Swarm mode
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Read-only root filesystem (security hardening)
+    # Uncomment if your app doesn't need write access
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    #   - /app/logs
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=api-gateway,environment=production"
+    
+    # Labels for monitoring and management
+    labels:
+      com.hubinvestments.service: "api-gateway"
+      com.hubinvestments.version: "${VERSION:-latest}"
+      com.hubinvestments.environment: "production"
+      traefik.enable: "true"
+      traefik.http.routers.gateway.rule: "Host(`api.hubinvestments.com`)"
+      traefik.http.routers.gateway.tls: "true"
+
+  # ============================================================================
+  # Redis Service (Production)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: hub-redis-prod
+    
+    # Port mapping (internal only in production)
+    expose:
+      - "6379"
+    
+    # Redis configuration (production-optimized)
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --requirepass ${REDIS_PASSWORD:-}
+      --tcp-backlog 511
+      --timeout 300
+      --tcp-keepalive 300
+      --loglevel warning
+    
+    # Persistent storage
+    volumes:
+      - redis-data:/data
+    
+    # Networking
+    networks:
+      - hub-network
+    
+    # Restart policy
+    restart: always
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Labels
+    labels:
+      com.hubinvestments.service: "redis-cache"
+      com.hubinvestments.version: "7-alpine"
+      com.hubinvestments.environment: "production"
+
+  # ============================================================================
+  # Prometheus (Monitoring) - Optional
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hub-prometheus
+    
+    # Configuration
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    
+    # Port mapping
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    
+    # Command
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    
+    # Networking
+    networks:
+      - hub-network
+    
+    # Restart policy
+    restart: always
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Labels
+    labels:
+      com.hubinvestments.service: "prometheus"
+      com.hubinvestments.environment: "production"
+
+  # ============================================================================
+  # Grafana (Visualization) - Optional
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hub-grafana
+    
+    # Port mapping
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    
+    # Environment
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    
+    # Volumes
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    
+    # Dependencies
+    depends_on:
+      - prometheus
+    
+    # Networking
+    networks:
+      - hub-network
+    
+    # Restart policy
+    restart: always
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Labels
+    labels:
+      com.hubinvestments.service: "grafana"
+      com.hubinvestments.environment: "production"
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  # Redis persistent data
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/hub-investments/redis
+    labels:
+      com.hubinvestments.volume: "redis-data"
+      com.hubinvestments.backup: "true"
+  
+  # Gateway logs
+  gateway-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/log/hub-investments/gateway
+    labels:
+      com.hubinvestments.volume: "gateway-logs"
+  
+  # Prometheus data
+  prometheus-data:
+    driver: local
+    labels:
+      com.hubinvestments.volume: "prometheus-data"
+  
+  # Grafana data
+  grafana-data:
+    driver: local
+    labels:
+      com.hubinvestments.volume: "grafana-data"
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  hub-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: hub-br0
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+    labels:
+      com.hubinvestments.network: "hub-network"
+      com.hubinvestments.environment: "production"
+
+# ============================================================================
+# Secrets (Docker Swarm)
+# ============================================================================
+# Uncomment for Docker Swarm deployments
+# secrets:
+#   jwt_secret:
+#     external: true
+#   redis_password:
+#     external: true
+
