@@ -96,6 +96,11 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request, rou
 		"x-original-uri":     r.RequestURI,
 	})
 
+	// Forward Authorization header to gRPC metadata
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		md.Set("authorization", authHeader)
+	}
+
 	// Add user context if authenticated
 	if userContext != nil {
 		md.Set("x-user-id", userContext.UserID)
